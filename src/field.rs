@@ -40,8 +40,25 @@ pub type Limb = i32;
 pub struct FieldElement(pub [Limb; 10]);
 
 impl PartialEq for FieldElement {
+    /// Test equality between two FieldElements by converting them to bytes.
+    ///
+    /// # Warning
+    ///
+    /// This comparison is *not* constant time.  It could easily be
+    /// made to be, but the main use of an `Eq` implementation is for
+    /// branching, so it seems pointless.
+    ///
+    /// XXX it would be good to encode constant-time considerations
+    /// (no data flow from secret information) into Rust's type
+    /// system.
     fn eq(&self, other: &FieldElement) -> bool {
-        unimplemented!()
+        let  self_bytes =  self.to_bytes();
+        let other_bytes = other.to_bytes();
+        let mut are_equal: bool = true;
+        for i in 0..32 {
+            are_equal &= self_bytes[i] == other_bytes[i];
+        }
+        return are_equal;
     }
 }
 
@@ -155,27 +172,6 @@ impl FieldElement {
     /// Construct the additive identity
     pub fn zero() -> FieldElement {
         FieldElement([ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ])
-    }
-
-    /// Test equality between two FieldElements by converting them to bytes.
-    ///
-    /// # Warning
-    ///
-    /// This comparison is *not* constant time.  It could easily be
-    /// made to be, but the main use of byte-for-byte comparison is for
-    /// branching, so it seems pointless.
-    ///
-    // XXX it would be good to encode constant-time considerations
-    // (no data flow from secret information) into Rust's type
-    // system.
-    fn bytes_eq(&self, other: &FieldElement) -> bool {
-        let  self_bytes =  self.to_bytes();
-        let other_bytes = other.to_bytes();
-        let mut are_equal: bool = true;
-        for i in 0..32 {
-            are_equal &= self_bytes[i] == other_bytes[i];
-        }
-        are_equal
     }
 
     /// Construct the multiplicative identity
