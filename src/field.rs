@@ -39,27 +39,13 @@ pub type Limb = i32;
 #[derive(Copy, Clone)]
 pub struct FieldElement(pub [Limb; 10]);
 
-impl Eq for FieldElement {}
 impl PartialEq for FieldElement {
-    // XXX ugh… maybe do something about all these icky conversions between u8
-    // and bool, remnants of bad C APIs.
     fn eq(&self, other: &FieldElement) -> bool {
-        let diff: bool = (self - other).is_non_zero();
-        let mask: u32;
-
-        if diff == true {
-            mask = 0;
-        } else {
-            mask = 1;
-        }
-
-        if 1 ^ (1 & (mask >> 8)) == 1 {
-            return true;
-        } else {
-            return false;
-        }
+        unimplemented!()
     }
 }
+
+impl Eq for FieldElement {}
 
 impl Debug for FieldElement {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
@@ -169,15 +155,6 @@ impl FieldElement {
     /// Construct the additive identity
     pub fn zero() -> FieldElement {
         FieldElement([ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ])
-    }
-
-    /// Returns true if this `FieldElement` is non-zero.
-    pub fn is_non_zero(&self) -> bool {
-        if *self == FieldElement::zero() {
-            return false;
-        } else {
-            return true;
-        }
     }
 
     /// Test equality between two FieldElements by converting them to bytes.
