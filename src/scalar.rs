@@ -34,6 +34,7 @@ use rand::Rng;
 
 use constants;
 use field::{load3, load4};
+use util;
 
 /// The `Scalar` struct represents an element in ℤ/lℤ, where
 ///
@@ -42,6 +43,24 @@ use field::{load3, load4};
 /// is the order of the basepoint.
 #[derive(Copy)]
 pub struct Scalar(pub [u8; 32]);
+
+impl Eq for Scalar{}
+impl PartialEq for Scalar {
+    /// Test equality between two `Scalar`s in constant time.
+    ///
+    /// Returns
+    ///
+    /// True if they are equal, and false otherwise.
+    fn eq(&self, other: &Self) -> bool {
+        let equal: u8 = util::arrays_equal_ct(&self.0, &other.0);
+
+        if equal == 1 {
+            return true;
+        } else {
+            return false;
+        }
+    }
+}
 
 impl Clone for Scalar {
     fn clone(&self) -> Scalar { *self }
