@@ -240,6 +240,9 @@ pub trait Identity {
     /// Returns the identity element of the curve.
     /// Can be used as a constructor.
     fn identity() -> Self;
+
+    /// Return true if this element is the identity element of the curve.
+    fn is_identity(&self) -> bool;
 }
 
 impl Identity for ExtendedPoint {
@@ -249,6 +252,16 @@ impl Identity for ExtendedPoint {
                        Z: FieldElement::one(),
                        T: FieldElement::zero() }
     }
+
+    fn is_identity(&self) -> bool {
+        if self.X == FieldElement::zero() &&
+           self.Y == FieldElement::one()  &&
+           self.Z == FieldElement::one()  &&
+           self.T == FieldElement::zero() {
+               return true;
+            }
+        false
+    }
 }
 
 impl Identity for ProjectivePoint {
@@ -256,6 +269,15 @@ impl Identity for ProjectivePoint {
         ProjectivePoint{ X: FieldElement::zero(),
                          Y: FieldElement::one(),
                          Z: FieldElement::one() }
+    }
+
+    fn is_identity(&self) -> bool {
+        if self.X == FieldElement::zero() &&
+           self.Y == FieldElement::one()  &&
+           self.Z == FieldElement::one() {
+               return true;
+            }
+        false
     }
 }
 
@@ -266,6 +288,16 @@ impl Identity for CachedPoint {
                      Z:         FieldElement::one(),
                      T2d:       FieldElement::zero() }
     }
+
+    fn is_identity(&self) -> bool {
+        if self.Y_plus_X  == FieldElement::one() &&
+           self.Y_minus_X == FieldElement::one() &&
+           self.Z         == FieldElement::one() &&
+           self.T2d       == FieldElement::zero() {
+               return true;
+            }
+        false
+    }
 }
 
 impl Identity for PreComputedPoint {
@@ -275,6 +307,15 @@ impl Identity for PreComputedPoint {
             y_minus_x: FieldElement::one(),
             xy2d:      FieldElement::zero(),
         }
+    }
+
+    fn is_identity(&self) -> bool {
+        if self.y_plus_x  == FieldElement::one() &&
+           self.y_minus_x == FieldElement::one() &&
+           self.xy2d      == FieldElement::zero() {
+               return true;
+            }
+        false
     }
 }
 
@@ -1060,6 +1101,14 @@ mod test {
 
         assert!(p1.is_small_order() == true);
         assert!(p2.is_small_order() == false);
+    }
+
+    #[test]
+    fn test_is_identity() {
+        assert!(ExtendedPoint::identity().is_identity());
+        assert!(ProjectivePoint::identity().is_identity());
+        assert!(CachedPoint::identity().is_identity());
+        assert!(PreComputedPoint::identity().is_identity());
     }
 
     #[bench]
