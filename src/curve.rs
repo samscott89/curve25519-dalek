@@ -154,6 +154,38 @@ impl CompressedEdwardsY {
 
         Some(ExtendedPoint{ X: X, Y: Y, Z: Z, T: &X * &Y })
     }
+
+    /// Convert this `CompressedEdwardsY` to a `CompressedMontgomeryX`.
+    ///
+    /// The isomorphism is `x=(y+1)/(1-y)`.  Since `y=Y/Z`, this gives
+    /// `x=(Y+Z)/(Z-Y)`. We know that Z=1, thus `x=(Y+1)/(1-Y)`.
+    pub fn to_montgomery_x(&self) -> CompressedMontgomeryX {
+        let Y: FieldElement = FieldElement::from_bytes(&self.0);
+        let X: FieldElement = &(&FieldElement::one() - &Y).invert() * &(&Y + &FieldElement::one());
+
+        let mut x: [u8; 32];
+
+        x      =  X.to_bytes();
+        x[31] ^= (Y.is_negative_ed25519() << 7) as u8;
+        // CompressedMontgomeryX(x)
+
+        unimplemented!()
+    }
+}
+
+/// In "Montgomery X" format, the point `(x,y)` on the curve is
+/// determined by the `x`-coordinate and the sign of `y`, marshalled
+/// into a 32-byte array.
+///
+/// The first 255 bits of a `CompressedMontgomeryX` represent the
+/// x-coordinate. The high bit of the 32nd byte gives the sign of `y`.
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub struct CompressedMontgomeryX(pub [u8; 32]);
+
+impl CompressedMontgomeryX {
+    fn to_edwards_y(&self) -> CompressedEdwardsY {
+        unimplemented!()
+    }
 }
 
 /// In "Montgomery u" format, as used in X25519, a point `(u,v)` on
