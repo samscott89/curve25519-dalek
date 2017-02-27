@@ -57,8 +57,12 @@ pub mod scalar;
 pub mod curve;
 
 // Feature gate decaf while our implementation is unfinished and probably incorrect.
-#[cfg(feature = "yolocrypto")]
+#[cfg(feature = "decaf")]
 pub mod decaf;
+
+// Feature gate elligator while our implementation is half-finished and probably incorrect.
+#[cfg(feature = "elligator")]
+pub mod elligator;
 
 // Constant-time functions and other miscelaneous utilities.
 

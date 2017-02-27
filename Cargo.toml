@@ -35,7 +35,9 @@ version = "0.4"
 [features]
 default = ["std"]
 std = ["rand"]
-yolocrypto = []
+yolocrypto = ["decaf", "elligator"]
+decaf = []
+elligator = []
 
 # The development profile, used for `cargo build`.
 [profile.dev]
