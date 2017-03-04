@@ -117,3 +117,16 @@ pub fn conditional_assign_u8(this: &mut u8, other: &u8, choice: &u8) {
 
     this ^= mask & (this ^ other);
 }
+
+/// Conditionally assign an `other` `i8` to this `this` `i8`, in constant time.
+///
+/// # Inputs
+///
+/// * If `choice == 1u8`, assign `other` to `this`.
+/// * Otherwise, if `choice == 0u8` leave `this` unchanged.
+#[inline(always)]
+pub fn conditional_assign_i8(this: &mut i8, other: &i8, choice: &u8) {
+    let mask: u8 = -choice;
+
+    this ^= (mask as i8) & (this ^ other);
+}
