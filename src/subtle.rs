@@ -130,3 +130,17 @@ pub fn conditional_assign_i8(this: &mut i8, other: &i8, choice: &u8) {
 
     this ^= (mask as i8) & (this ^ other);
 }
+
+/// Compute the absolute value of `this` `i8` in constant time.
+///
+/// # Returns
+///
+/// An `u8` whose value is the absolute value of `this`, i.e. `|this|`.
+pub fn abs_i8(this: &i8) -> u8 {
+    let mask: u8 = this.is_negative() as u8;
+    let negative: i8 = -this;
+    let mut absolute: i8 = *this;
+
+    conditional_assign_i8(&mut absolute, &negative, &(-mask));
+    absolute as u8
+}
