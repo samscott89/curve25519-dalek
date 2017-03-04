@@ -104,3 +104,16 @@ pub fn arrays_equal_ct(a: &[u8; 32], b: &[u8; 32]) -> u8 {
     }
     bytes_equal_ct(x, 0)
 }
+
+/// Conditionally assign an `other` `u8` to this `this` `u8`, in constant time.
+///
+/// # Inputs
+///
+/// * If `choice == 1u8`, assign `other` to `this`.
+/// * Otherwise, if `choice == 0u8` leave `this` unchanged.
+#[inline(always)]
+pub fn conditional_assign_u8(this: &mut u8, other: &u8, choice: &u8) {
+    let mask: u8 = -choice;
+
+    this ^= mask & (this ^ other);
+}
