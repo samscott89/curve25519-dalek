@@ -31,8 +31,10 @@
 use curve::ExtendedPoint;
 use curve::CompressedMontgomeryU;
 use constants::A;
+use constants::HALF_Q_MINUS_1_BYTES;
+use constants::SQRT_M1;
+use constants::SQRT_MINUS_HALF;
 use field::FieldElement;
-use scalar::Scalar;
 use subtle::CTAssignable;
 
 
@@ -105,18 +107,71 @@ impl UniformRepresentative {
     ///
     /// A `UniformRepresentative` encoding of the `point`.
     pub fn encode(point: &ExtendedPoint) -> Option<UniformRepresentative> {
-        // u = -A/(1 + nr²);   w = u(u² + Au + 1);   u' = -(A+u);
-        let (mut u, w, uprime) = UniformRepresentative::elligator2(&point.X);
+        /// u = -A/(1 + nr²);   w = u(u² + Au + 1);   u' = -(A+u);
+        //let (mut u, w, uprime) = UniformRepresentative::elligator2(&point.X);
+        //let nonsquare: u8 = legendre_is_nonsquare(&w);
+        //if nonsquare == 0 { return None; }
+        /// If w is non-square, then we recompute u to be u' = -A - u:
+        //u.conditional_assign(&uprime, nonsquare);
+        //Some(UniformRepresentative(u))
 
-        let nonsquare: u8 = legendre_is_nonsquare(&w);
+        //let a:     ExtendedPoint = ExtendedPoint::basepoint_mult(&Scalar(self.masked()));
+        let inv:   FieldElement  = (&(&point.Z - &point.Y) * &point.X).invert();  // 1/XZ-XY
+        let mut t: FieldElement  = &point.Y + &point.Z;        // Y+Z
+        let u:     FieldElement  = &(&inv * &point.X) * &t;    // (X/X(Z-Y))*(Y+Z) == (Y+Z)/(Z-Y)
 
-        if nonsquare == 0 {
-            return None;
-        }
-        // If w is non-square, then we recompute u to be u' = -A - u:
-        u.conditional_assign(&uprime, nonsquare);
+        //let a:   ExtendedGroupElement = curve::scalar_mult_base(&Scalar(point.as_bytes()));
+        //let inv: FieldElement         = ((a.Z - a.Y) * a.X).invert();  // 1/XZ-XY
+        //let mut t: FieldElement = a.Y + a.Z;       // Y+Z
+        //let u:     FieldElement = (inv * a.X) * t; // (X/X(Z-Y))*(Y+Z) == (Y+Z)/(Z-Y)
 
-        Some(UniformRepresentative(u))
+        let v:     FieldElement  = &inv * &t;                  // Y+Z/XZ-XY
+
+        let b:     FieldElement  = &u + &A;
+        let b3:    FieldElement  = &b.square() * &b;  // b^3
+        let mut c: FieldElement  = &b3.square() * &b; // b^7  // XXX reuse
+        let b8:    FieldElement  = &c * &b;           // b^8
+        c    = c.pow_p58();                           // b^(7*(p-5)/8)
+
+        let mut chi: FieldElement = c.square();       // b^(14*(p-5)/8)
+        chi  = &chi.square() * &u.square();           // b^(28*(p-5)/8)
+        t    = &b3.square() * &b;                     // b^7  // XXX reuse here
+        t    = t.square();                            // b^14;
+        chi *= &t;
+        chi  = -(&chi);
+
+        // chi[1] is either 0 or 0xFF
+        if chi.to_bytes()[1] == 0xFF { return None; }
+
+        // Calculate r1 == sqrt(-u/(2*(u+A)))
+        let mut r1: FieldElement = &(&(&c * &u) * &b3) * &SQRT_MINUS_HALF;
+
+        t  = &r1.square() * &b; // XXX combine
+        t += &(&t + &u);
+
+        let mut maybe_sqrt_m1: FieldElement = FieldElement::one();
+        maybe_sqrt_m1.conditional_assign(&SQRT_M1, t.is_nonzero());
+        r1 *= &maybe_sqrt_m1;  // XXX make conditional_mult() ?
+
+        // Calculate r = sqrt(-(u+A)/(2u))
+        let mut r: FieldElement;
+        t  = &c.square() * &c;    // (b^(7*(p-5)/8)) ^3  // XXX combine with next line
+        t  = t.square();          // (b^(7*(p-5)/8)) ^6
+        r  = &t * &c;             // (b^(7*(p-5)/8)) ^7
+        t  = &u.square() * &u;    // (Y+Z)/(Z-Y) ^3
+        r *= &t;
+        t  = &(&b8.square() * &b8) * &b;  // b^25
+        r *= &(&t * &SQRT_MINUS_HALF);
+        t  = &(&r.square() * &u) + &(&t + &b);
+
+        maybe_sqrt_m1 = FieldElement::one();
+        maybe_sqrt_m1.conditional_assign(&SQRT_M1, t.is_nonzero());
+        r *= &maybe_sqrt_m1;
+
+        let v_in_square_root_image: u8 = v.bytes_equal_less_than(&HALF_Q_MINUS_1_BYTES);
+        r.conditional_assign(&r1, v_in_square_root_image);
+
+        Some(UniformRepresentative(r))
     }
 
     /// Decode this `UniformRepresentative` into an `ExtendedPoint`.
@@ -124,26 +179,62 @@ impl UniformRepresentative {
     /// # Return
     ///
     /// An `ExtendedPoint`.
-    pub fn decode(&self) -> CompressedMontgomeryU {
-        let r: FieldElement = FieldElement::from_bytes(&self.to_bytes());
+    pub fn decode(&self) -> Option<ExtendedPoint> {  // RepresentativeToPublicKey
+        let mut v: FieldElement;
+        let mut v2: FieldElement;
+        let v3: FieldElement;
+        let mut e: FieldElement;
 
-        // u = -A/(1 + nr²);   w = u(u² + Au + 1);   u' = -(A+u);
-        let (mut u, w, uprime) = UniformRepresentative::elligator2(&r);
+        let mut rr2: FieldElement = self.0;
+        rr2 = rr2.square2();
+        rr2[0] += 1;
+        rr2 = rr2.invert();
 
-        // If u and u' are integers modulo p such that u' = -A - u and u/u' = nr²
-        // for any r and fixed nonsquare n, then the Montgomery curve equation
-        // v = u(u² + Au + 1) has a solution for u = u or u = u', or both.
-        //
-        // From the above lemma, it follows that u = -A/(1 + nr²) and
-        // u' = -Anr²/(1 + nr²). Thus, given r, we can easily calculate u and u' and
-        // use the Legendre symbol to choose whichever value gives a square w.
-        let nonsquare: u8 = legendre_is_nonsquare(&w);
+        v   = -&(&A * &rr2);
+        v2  = v.square();
+        v3  = &v * &v2;
+        e   = &v3 + &v;
+        v2 *= &A;
+        e  += &v2;
+        e   = e.chi();
 
-        // If w is non-square, then we recompute u to be u' = -A - u:
-        u.conditional_assign(&uprime, nonsquare);
+	    // e.to_bytes[1] is either 0 (for e = 1) or 0xff (for e = -1)
+        let e_is_minus_one: u8 = e.to_bytes()[1] & 1;
+        let minus_v: FieldElement = -&v;
 
-        CompressedMontgomeryU(u.to_bytes())
+        v.conditional_assign(&minus_v, e_is_minus_one);
+        v2 = FieldElement::zero();
+        v2.conditional_assign(&A, e_is_minus_one);
+        v -= &v2;
+
+        CompressedMontgomeryU(v.to_bytes()).decompress()
     }
+
+    /// Decode this `UniformRepresentative` into an `ExtendedPoint`.
+    ///
+    /// # Return
+    ///
+    /// An `ExtendedPoint`.
+    // pub fn decode(&self) -> Option<ExtendedPoint> {
+    //     let r: FieldElement = FieldElement::from_bytes(&self.to_bytes());
+    //
+    //     // u = -A/(1 + nr²);   w = u(u² + Au + 1);   u' = -(A+u);
+    //     let (mut u, w, uprime) = UniformRepresentative::elligator2(&r);
+    //
+    //     // If u and u' are integers modulo p such that u' = -A - u and u/u' = nr²
+    //     // for any r and fixed nonsquare n, then the Montgomery curve equation
+    //     // v = u(u² + Au + 1) has a solution for u = u or u = u', or both.
+    //     //
+    //     // From the above lemma, it follows that u = -A/(1 + nr²) and
+    //     // u' = -Anr²/(1 + nr²). Thus, given r, we can easily calculate u and u' and
+    //     // use the Legendre symbol to choose whichever value gives a square w.
+    //     let nonsquare: u8 = legendre_is_nonsquare(&w);
+    //
+    //     // If w is non-square, then we recompute u to be u' = -A - u:
+    //     u.conditional_assign(&uprime, nonsquare);
+    //
+    //     CompressedMontgomeryU(u.to_bytes()).decompress()
+    // }
 
     /// # Return
     ///
@@ -178,43 +269,38 @@ mod test {
         let mut rng: OsRng = OsRng::new().unwrap();
         let mut p: Option<ExtendedPoint> = None;
         let mut u: Option<UniformRepresentative> = None;
-        let r: CompressedMontgomeryU;
+        let r: ExtendedPoint;
 
         while u.is_none() {
             p = Some(ExtendedPoint::basepoint_mult(&Scalar::random(&mut rng)));
-            //u = UniformRepresentative::encode(&p);
-            u = Some(UniformRepresentative(FieldElement::one()));
+            u = UniformRepresentative::encode(&p.unwrap());
         }
-        r = u.unwrap().decode();
+        r = u.unwrap().decode().unwrap();
 
-        assert_eq!(p.unwrap().compress_montgomery().unwrap(), r);
+        assert_eq!(p.unwrap().compress_edwards(), r.compress_edwards());
     }
 
-    // #[test]
-    // fn encode() {
-    //     let mut rng: OsRng = OsRng::new().unwrap();
-    //     let p: ExtendedPoint = ExtendedPoint::basepoint_mult(&Scalar::random(&mut rng));
-    //     
-    //     UniformRepresentative::encode(&p);
-    // }
-    // 
-    // #[test]
-    // fn decode() {
-    //     let mut rng: OsRng = OsRng::new().unwrap();
-    //     let mut p: ExtendedPoint;
-    //     let mut u: Option<UniformRepresentative>;
-    //     let r: CompressedMontgomeryU;
-    // 
-    //     loop {
-    //         p = ExtendedPoint::basepoint_mult(&Scalar::random(&mut rng));
-    //         u = UniformRepresentative::encode(&p);
-    // 
-    //         if u.is_some() {
-    //             r = u.unwrap().decode();
-    //             break;
-    //         }
-    //     }
-    // }
+    #[test]
+    fn encode() {
+        let mut rng: OsRng = OsRng::new().unwrap();
+        let p: ExtendedPoint = ExtendedPoint::basepoint_mult(&Scalar::random(&mut rng));
+
+        UniformRepresentative::encode(&p);
+    }
+
+    #[test]
+    fn decode() {
+        let mut rng: OsRng = OsRng::new().unwrap();
+        let mut p: Option<ExtendedPoint> = None;
+        let mut u: Option<UniformRepresentative> = None;
+        let r: ExtendedPoint;
+
+        while u.is_none() {
+            p = Some(ExtendedPoint::basepoint_mult(&Scalar::random(&mut rng)));
+            u = UniformRepresentative::encode(&p.unwrap());
+        }
+        r = u.unwrap().decode().unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -229,31 +315,31 @@ mod bench {
 
     use super::*;
 
-    // #[bench]
-    // fn encode(b: &mut Bencher) {
-    //     let mut rng: OsRng = OsRng::new().unwrap();
-    //     let p: ExtendedPoint = ExtendedPoint::basepoint_mult(&Scalar::random(&mut rng));
-    //     
-    //     b.iter(| | UniformRepresentative::encode(&p) )
-    // }
-    // 
-    // #[bench]
-    // fn decode(b: &mut Bencher) {
-    //     let mut rng: OsRng = OsRng::new().unwrap();
-    //     let mut p: ExtendedPoint;
-    //     let mut u: Option<UniformRepresentative>;
-    //     let r: UniformRepresentative;
-    // 
-    //     loop {
-    //         p = ExtendedPoint::basepoint_mult(&Scalar::random(&mut rng));
-    //         u = UniformRepresentative::encode(&p);
-    // 
-    //         if u.is_some() {
-    //             r = u.unwrap();
-    //             break;
-    //         }
-    //     }
-    // 
-    //     b.iter(| | r.decode() )
-    // }
+    #[bench]
+    fn encode(b: &mut Bencher) {
+        let mut rng: OsRng = OsRng::new().unwrap();
+        let p: ExtendedPoint = ExtendedPoint::basepoint_mult(&Scalar::random(&mut rng));
+
+        b.iter(| | UniformRepresentative::encode(&p) )
+    }
+
+    #[bench]
+    fn decode(b: &mut Bencher) {
+        let mut rng: OsRng = OsRng::new().unwrap();
+        let mut p: ExtendedPoint;
+        let mut u: Option<UniformRepresentative>;
+        let r: UniformRepresentative;
+
+        loop {
+            p = ExtendedPoint::basepoint_mult(&Scalar::random(&mut rng));
+            u = UniformRepresentative::encode(&p);
+
+            if u.is_some() {
+                r = u.unwrap();
+                break;
+            }
+        }
+
+        b.iter(| | r.decode() )
+    }
 }

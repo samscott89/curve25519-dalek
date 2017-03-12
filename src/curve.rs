@@ -189,9 +189,14 @@ impl CompressedEdwardsY {
 pub struct CompressedMontgomeryU(pub [u8; 32]);
 
 impl CompressedMontgomeryU {
-    /// View this `CompressedMontgomeryU` as an array of bytes.
+    /// Convert this `CompressedMontgomeryU` to an array of bytes.
     pub fn to_bytes(&self) -> [u8; 32] {
         self.0
+    }
+
+    /// Convert this `CompressedMontgomeryU` to a `FieldElement`.
+    pub fn to_field_element(&self) -> FieldElement {
+        FieldElement::from_bytes(&self.0)
     }
 
     /// Attempt to decompress to an `ExtendedPoint`.
