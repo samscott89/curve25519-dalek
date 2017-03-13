@@ -1061,7 +1061,7 @@ impl ExtendedPoint {
     /// point.
     #[allow(unused_variables)] // REMOVE WHEN IMPLEMENTED
     pub fn from_uniform_representative(representative: UniformRepresentative) -> Option<ExtendedPoint> {
-        representative.decode().decompress()
+        representative.decode()
     }
 }
 
@@ -1097,7 +1097,7 @@ impl ExtendedPoint {
     /// rng.fill_bytes(&mut nonce);
     ///
     /// // Use the nonce to produce a uniformly random point on the curve:
-    /// let p: ExtendedPoint = ExtendedPoint::hash_to_point<Keccak512>(&nonce);
+    /// let p: ExtendedPoint = ExtendedPoint::from_hash<Keccak512>(&nonce);
     /// ```
     ///
     /// # Return
@@ -1126,8 +1126,10 @@ impl ExtendedPoint {
 
             // Take the hash as a uniform representative of a point on the curve
             // and decode it into a Montgomery U coordintate:
-            let compressed_u: CompressedMontgomeryU = UniformRepresentative::from_bytes(&digest).decode();
+            let p: ExtendedPoint = UniformRepresentative::from_bytes(array_ref!(digest, 0, 32)).decode().unwrap();
             // XXX this is slightly inefficient, there's an extra field element from bytes
+
+            let compressed_u: CompressedMontgomeryU = p.compress_montgomery().unwrap();
 
             let u:          FieldElement  = FieldElement::from_bytes(&compressed_u.0);
             let (_, v): (_, FieldElement) = CompressedMontgomeryU::to_montgomery_v(&u);
