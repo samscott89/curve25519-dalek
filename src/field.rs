@@ -20,7 +20,7 @@ use core::ops::{Add, AddAssign};
 use core::ops::{Sub, SubAssign};
 use core::ops::{Mul, MulAssign};
 use core::ops::{Index, IndexMut};
-use core::cmp::{Eq, PartialEq};
+use core::cmp::{Eq, PartialEq, Ord, Ordering, PartialOrd};
 use core::ops::Neg;
 
 use subtle::arrays_equal;
@@ -86,6 +86,46 @@ impl PartialEq for FieldElement {
             are_equal &= self_bytes[i] == other_bytes[i];
         }
         are_equal
+    }
+}
+
+impl PartialOrd for FieldElement {
+    /// Test equality between two FieldElements by converting them to bytes.
+    fn partial_cmp(&self, other: &FieldElement) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for FieldElement {
+    /// Test equality between two FieldElements by converting them to bytes.
+    fn cmp(&self, other: &FieldElement) -> Ordering {
+        let  self_bytes =  self.to_bytes();
+        let other_bytes = other.to_bytes();
+        // let mut are_equal: bool = true;
+        let mut equal_so_far: i32 = -1;
+        let mut greater: i32 = 0;
+        for i in (0..32).rev() {
+            // are_equal &= self_bytes[i] == other_bytes[i];
+            let x = self_bytes[i] as i32;
+            let y = other_bytes[i] as i32;
+            greater = (!equal_so_far & greater) | (equal_so_far & ((x - y) >> 31));
+            equal_so_far = equal_so_far & (((x ^ y) - 1) >> 31);
+        }
+
+        match (greater == 0, equal_so_far != 0) {
+            (false, false) => {
+                // Neither greater nor equal
+                Ordering::Less
+            },
+            (_, true) => {
+                // Equal
+                Ordering::Equal
+            },
+            (true, false) => {
+                // Greater and not equal
+                Ordering::Greater
+            }
+        }
     }
 }
 
@@ -1321,6 +1361,30 @@ mod test {
         let ainv = FieldElement::from_bytes(&AINV_BYTES);
         assert!(a == a);
         assert!(a != ainv);
+    }
+
+    #[test]
+    fn ordering() {
+        let base = A_BYTES;
+        let mut base = FieldElement::from_bytes(&base);
+        let mut less = base.clone();
+        less.0[0] -= 1;
+        let mut more = base.clone();
+        more.0[0] += 1;
+        let equal = base.clone();
+        let mut less2 = base.clone();
+        less2.0[0] += 1;
+        less2.0[3] -= 1;
+        let mut more2 = base.clone();
+        more2.0[0] -= 1;
+        more2.0[3] += 1;
+        println!("{:?}", less.cmp(&base));
+        assert!(less < base);
+        assert!(more > base);
+        assert!(equal == base);
+        assert!(equal <= base);
+        assert!(less2 < base);
+        assert!(more2 > base);
     }
 
     /// Notice that the last element has the high bit set, which

@@ -1105,14 +1105,125 @@ impl ExtendedPoint {
     /// Elligator2 map.  For a random point on the curve, this happens
     /// with probability 1/2.  Otherwise, returns `None`.
     pub fn to_uniform_representative(&self) -> Option<[u8; 32]> {
-        unimplemented!();
+        let mut inv1 = &self.Z - &self.Y;
+        inv1 *= &self.X;
+        inv1 = inv1.invert();
+
+        let mut u = &inv1 * &self.X;
+        let mut t0 = &self.Y + &self.Z;
+        u *= &t0;
+
+        let mut v = &t0 * &inv1;
+        v *= &self.Z;
+        v *= &constants::SQRT_MINUS_APLUS2;
+
+        let b = &u + &constants::A;
+
+        let mut b3 = b.square();
+        b3 *= &b;
+        let c = b3.square();
+        let b7 = &c * &b;
+        let b8 = &b7 * &b;
+        let c = &b7 * &u;
+        let c = c.pow_p58();
+
+        let mut chi = c.square().square();
+
+        t0 = u.square();
+        chi *= &t0;
+
+        t0 = b7.square();
+        chi *= &t0;
+        chi.negate();
+
+        if chi.to_bytes()[1] == 0xff {
+            return None;
+        }
+
+        let mut r1 = &c * &u;
+        r1 *= &b3;
+        r1 *= &constants::SQRT_MINUS_HALF;
+
+        t0 = r1.square();
+        t0 *= &b;
+        t0 = &t0 + &t0;
+        t0 += &u;
+
+        let mut maybe_sqrt_m1 = FieldElement::one();
+        maybe_sqrt_m1.conditional_assign(&constants::SQRT_M1, t0.is_nonzero());
+        r1 *= &maybe_sqrt_m1;
+
+        t0 = c.square();
+        t0 *= &c;
+        t0 = t0.square();
+        let mut r = &t0 * &c;
+
+        t0 = u.square();
+        t0 *= &u;
+        r *= &t0;
+
+        t0 = b8.square();
+        t0 *= &b8;
+        t0 *= &b;
+        r *= &t0;
+        r *= &constants::SQRT_MINUS_HALF;
+
+        t0 = r.square();
+        t0 *= &u;
+        t0 = &t0 + &t0;
+        t0 += &b;
+        let mut maybe_sqrt_m1 = FieldElement::one();
+        maybe_sqrt_m1.conditional_assign(&constants::SQRT_M1, t0.is_nonzero());
+        r *= &maybe_sqrt_m1;
+
+        let v_in_square_root_image = &v <= &FieldElement::from_bytes(&constants::HALF_Q_MINUS_1_BYTES);
+        r.conditional_assign(&r1, v_in_square_root_image as u8);
+
+        // Always return the positive value 0 <= r <= (p-1)/2?
+        let r_is_negative = r.is_negative_decaf();
+        r.conditional_negate(r_is_negative);
+        Some(r.to_bytes())
     }
 
     /// Use Elligator2 to convert a uniformly random string to a curve
     /// point.
-    #[allow(unused_variables)] // REMOVE WHEN IMPLEMENTED
     pub fn from_uniform_representative(bytes: &[u8; 32]) -> ExtendedPoint {
-        unimplemented!();
+        let mut rr2 = FieldElement::from_bytes(bytes);
+        rr2 = rr2.square2();
+        // Should the addition be done more formally with the below code?
+        // rr2 += &FieldElement::one();
+        rr2[0] += 1;
+        rr2 = rr2.invert();
+        let mut v = &constants::A * &rr2;
+        v.negate();
+
+        let mut v2 = v.square();
+        let v3 = &v * &v2;
+        let mut e = &v3 + &v;
+        v2 *= &constants::A;
+        e += &v2;
+        e = e.chi();
+
+        let e_bytes = e.to_bytes();
+        let e_is_minus1 = (e_bytes[1] as i32 & 1) as u8;
+        v.conditional_negate(e_is_minus1);
+
+        let mut v2 = FieldElement::zero();
+        v2.conditional_assign(&constants::A, e_is_minus1);
+        v -= &v2;
+
+        let u = v;
+        let (is_square, mut v) = CompressedMontgomeryU::to_montgomery_v(&u);
+        // We want the positive square root iff e is -1.
+        let flip = e_is_minus1 ^ v.is_nonnegative_decaf();
+        v.conditional_negate(flip);
+
+        let mut x: FieldElement = &(&u * &v.invert()) * &constants::SQRT_MINUS_APLUS2;
+        let mut y = CompressedMontgomeryU::to_edwards_y(&u);
+
+        let point = ProjectivePoint{ X: x, Y: y, Z: FieldElement::one() };
+        debug_assert!(point.is_valid());
+        point.to_extended()
     }
 }
 
@@ -1657,6 +1768,24 @@ mod test {
         output[2] = 1;
         let parsed: Result<ExtendedPoint, _> = serde_cbor::from_slice(&output);
         assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn elligator_sanity() {
+        use rand;
+        let mut rng = rand::OsRng::new().unwrap();
+        for _ in 0..10 {
+            let scalar = Scalar::random(&mut rng);
+            let elem = FieldElement::from_bytes(scalar.as_bytes());
+            let bytes = elem.to_bytes();
+
+            let decode = ExtendedPoint::from_uniform_representative(&bytes);
+            let decode_encode = decode.to_uniform_representative().unwrap();
+
+            assert_eq!(decode_encode, bytes);
+            let point = ExtendedPoint::from_uniform_representative(&decode_encode);
+            assert_eq!(point.compress_edwards().to_bytes(), decode.compress_edwards().to_bytes());
+        }
     }
 }
 
